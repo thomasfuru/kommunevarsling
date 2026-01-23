@@ -3,6 +3,6 @@ webdriver-manager
 requests
 psycopg2-binary
 pandas
-streamlit
+streamlit>=1.24.0
 schedule
 altair<5
