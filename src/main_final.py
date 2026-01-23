@@ -52,7 +52,7 @@ def setup_driver():
         print(f"❌ Kunne ikke starte Chrome: {e}")
         return None
 
-# --- ROBOT 1: SKIEN (Innsyn+) ---
+# --- ROBOT 1: SKIEN ---
 def scrape_skien(driver, cur, conn):
     print("\n🔵 Starter SKIEN-roboten...")
     try:
@@ -60,12 +60,15 @@ def scrape_skien(driver, cur, conn):
         driver.get(base_url)
         wait = WebDriverWait(driver, 20)
         
-        print("   ⏳ Venter på listen...")
         # Skien bruker 'details' i lenkene
-        saker = wait.until(EC.presence_of_all_elements_located((By.XPATH, "//a[contains(@href, 'details')]")))
-        
+        try:
+            saker = wait.until(EC.presence_of_all_elements_located((By.XPATH, "//a[contains(@href, 'details')]")))
+        except:
+            print("   ⚠️ Skien: Fant ingen saker på forsiden (Timeout).")
+            return
+
         sak_urler = []
-        for sak in saker[:10]: # Sjekker de 10 nyeste
+        for sak in saker[:10]: 
             href = sak.get_attribute("href")
             tittel = sak.text.strip()
             if href and not href.startswith("http"):
@@ -73,114 +76,136 @@ def scrape_skien(driver, cur, conn):
             if href and "details" in href:
                 sak_urler.append((href, tittel))
 
+        print(f"   Fant {len(sak_urler)} saker i Skien.")
         for perm_url, tittel in sak_urler:
             process_single_case(driver, cur, conn, perm_url, tittel, "Skien")
 
     except Exception as e:
         print(f"⚠️ Feil i Skien-roboten: {e}")
 
-# --- ROBOT 2: PORSGRUNN (Klassisk WebSak) ---
+# --- ROBOT 2: PORSGRUNN (NY OG FORBEDRET) ---
 def scrape_porsgrunn(driver, cur, conn):
     print("\n🟢 Starter PORSGRUNN-roboten...")
+    base_domain = "https://innsyn.porsgrunn.kommune.no"
+    
     try:
-        # Går til forsiden for innsyn
-        start_url = "https://innsyn.porsgrunn.kommune.no/innsyn"
-        driver.get(start_url)
-        wait = WebDriverWait(driver, 20)
+        # 1. Prøv direkte lenke til "Siste 50" først (Ofte sikrest)
+        # Dette er URL-en ACOS ofte bruker for snarveien
+        direct_url = "https://innsyn.porsgrunn.kommune.no/innsyn?response=journalpost_siste50"
+        print(f"   🌍 Går til: {direct_url}")
+        driver.get(direct_url)
+        
+        wait = WebDriverWait(driver, 15)
 
-        # 1. Klikk på "Siste 50 publiserte" (eller lignende lenke)
-        print("   ⏳ Leter etter 'Siste 50'...")
+        # Sjekk om vi faktisk kom til en tabell, eller om vi må klikke oss frem
         try:
-            # Porsgrunn har ofte en lenke som heter "Siste 50 publiserte i postlisten" eller bare "Siste 50..."
-            knapp = wait.until(EC.element_to_be_clickable((By.PARTIAL_LINK_TEXT, "Siste 50")))
-            knapp.click()
+            # Se etter rader i en tabell
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "tr")))
+            print("   ✅ Fant tabell direkte!")
         except:
-            print("   ⚠️ Fant ikke 'Siste 50'-knappen direkte. Prøver URL-triks...")
-            driver.get("https://innsyn.porsgrunn.kommune.no/innsyn?response=journalpost_siste50")
-        
-        # 2. Vent på tabellen
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "tr")))
-        
+            print("   ⚠️ Fant ingen tabell direkte. Prøver å klikke på menyen...")
+            # Gå til forsiden
+            driver.get("https://innsyn.porsgrunn.kommune.no/innsyn")
+            time.sleep(2)
+            
+            # Prøv å finne en lenke som inneholder "50" eller "Postliste"
+            try:
+                knapper = driver.find_elements(By.XPATH, "//a[contains(text(), '50') or contains(text(), 'Postliste')]")
+                if knapper:
+                    print(f"   Fant knapp: {knapper[0].text}. Klikker...")
+                    knapper[0].click()
+                    wait.until(EC.presence_of_element_located((By.TAG_NAME, "tr")))
+                else:
+                    print("   ❌ Fant ingen knapper for postliste. Porsgrunn-strukturen kan være endret.")
+                    return
+            except Exception as e:
+                print(f"   ❌ Klikking feilet: {e}")
+                return
+
         # 3. Hent rader
         rader = driver.find_elements(By.TAG_NAME, "tr")
-        print(f"   Fant {len(rader)} rader. Sjekker de første...")
+        print(f"   📊 Fant totalt {len(rader)} rader i tabellen.")
 
         porsgrunn_saker = []
-        for rad in rader[1:15]: # Hopper over overskrift, tar de 15 første
+        
+        # Start loopen fra rad 1 (hopp over overskrift)
+        for i, rad in enumerate(rader[1:15]): 
             try:
-                # I klassisk ACOS er tittelen ofte i kolonne nr 3 eller 4, og lenken er på et ikon
-                tekst = rad.text
-                if not tekst: continue
-                
-                # Finn lenke til detaljene (ofte på saksnummer eller ikon)
+                radtekst = rad.text
+                # Finn lenker
                 lenker = rad.find_elements(By.TAG_NAME, "a")
+                
                 detalj_url = None
                 
                 for lenke in lenker:
                     href = lenke.get_attribute("href")
-                    # Vi ser etter lenker som går til "registryEntry" (journalpost)
-                    if href and ("registryEntry" in href or "journalpost" in href):
+                    # Vi ser etter lenker som går til en sak/journalpost
+                    if href and ("registryEntry" in href or "case" in href or "journalpost" in href):
                         detalj_url = href
                         if not detalj_url.startswith("http"):
-                            detalj_url = "https://innsyn.porsgrunn.kommune.no/innsyn/" + detalj_url
+                            # Håndter relative lenker robust
+                            detalj_url = base_domain + "/innsyn/" + href.split("/")[-1] if "/innsyn/" not in href else base_domain + href
                         break
                 
                 if detalj_url:
-                    # Tittelen er ofte vanskelig å isolere i tabellen, så vi bruker hele radteksten foreløpig
-                    # eller henter den pent inne på detaljsiden.
-                    # Vi bruker rad-teksten kortet ned som foreløpig tittel.
-                    tittel = tekst.split("\n")[0][:100] 
+                    # Vi bruker radteksten som foreløpig tittel, rensket for nyllinjer
+                    tittel = " ".join(radtekst.split())[:100]
                     porsgrunn_saker.append((detalj_url, tittel))
-            except:
+                    print(f"      Rad {i}: Fant lenke -> {detalj_url}")
+                else:
+                    # Debug: Hvorfor fant vi ingen lenke her?
+                    pass 
+
+            except Exception as e:
+                print(f"      Feil på rad {i}: {e}")
                 continue
+
+        print(f"   🎯 Fant {len(porsgrunn_saker)} gyldige saker å behandle.")
 
         for perm_url, tittel in porsgrunn_saker:
             process_single_case(driver, cur, conn, perm_url, tittel, "Porsgrunn")
 
     except Exception as e:
-        print(f"⚠️ Feil i Porsgrunn-roboten: {e}")
+        print(f"⚠️ Hovedfeil i Porsgrunn-roboten: {e}")
 
-# --- FELLES HJELPEFUNKSJON FOR Å LAGRE OG LESE PDF ---
+# --- FELLES ---
 def process_single_case(driver, cur, conn, url, tittel, kommune_navn):
     try:
-        # Sjekk om finnes
         cur.execute("SELECT id FROM dokumenter WHERE ekstern_id = %s", (url,))
         if cur.fetchone():
-            return # Finnes allerede
+            return 
 
-        print(f"🔎 [{kommune_navn}] Ny sak: {tittel[:30]}...")
-        
-        # Legg til kommunenavn i tittelen for oversiktens skyld
+        print(f"🔎 [{kommune_navn}] Behandler: {tittel[:30]}...")
         lagrings_tittel = f"[{kommune_navn}] {tittel}"
 
-        # Gå inn på saken for å finne PDF
         driver.get(url)
-        time.sleep(2)
+        time.sleep(1) # Rask pause
         
         ocr_text = ""
         pdf_download_url = None
 
         try:
-            # Let etter PDF-lenker.
-            # Skien: 'api/file'
-            # Porsgrunn: 'variant=P' eller 'type=I' eller 'Download'
+            # Let etter PDF
             fil_lenker = driver.find_elements(By.XPATH, "//a[contains(@href, 'file') or contains(@href, 'download') or contains(@href, 'variant=P')]")
             
             if fil_lenker:
-                # Ta den første som ser ut som en hovedfil
                 raw_href = fil_lenker[0].get_attribute("href")
                 
-                # Fiks relative lenker for Porsgrunn/Skien
                 if raw_href and not raw_href.startswith("http"):
                     if kommune_navn == "Skien":
                         pdf_download_url = "https://innsynpluss.onacos.no" + raw_href
                     else:
-                        pdf_download_url = "https://innsyn.porsgrunn.kommune.no" + raw_href.lstrip("/")
+                        # Porsgrunn fiks
+                        base = "https://innsyn.porsgrunn.kommune.no/innsyn"
+                        if raw_href.startswith("/"):
+                            pdf_download_url = "https://innsyn.porsgrunn.kommune.no" + raw_href
+                        else:
+                            pdf_download_url = base + "/" + raw_href
                 else:
                     pdf_download_url = raw_href
 
                 if pdf_download_url:
-                    print("   📄 Laster ned PDF...")
+                    print(f"   📄 Fant PDF URL: {pdf_download_url[:40]}...")
                     pdf_response = requests.get(pdf_download_url, timeout=15)
                     if pdf_response.status_code == 200:
                         try:
@@ -190,12 +215,10 @@ def process_single_case(driver, cur, conn, url, tittel, kommune_navn):
                         except Exception:
                             ocr_text = "OCR_FAILED"
         except Exception as e:
-            print(f"   ⚠️ Fant ingen lesbar PDF: {e}")
+            print(f"   ⚠️ PDF-feil: {e}")
 
-        if not ocr_text:
-            ocr_text = tittel # Fallback
+        if not ocr_text: ocr_text = tittel
 
-        # Lagre
         cur.execute("""
             INSERT INTO dokumenter (tittel, url_pdf, ekstern_id, ocr_tekst, dato)
             VALUES (%s, %s, %s, %s, NOW())
@@ -204,7 +227,7 @@ def process_single_case(driver, cur, conn, url, tittel, kommune_navn):
         print("   ✅ Lagret!")
 
     except Exception as e:
-        print(f"⚠️ Feil under lagring av sak: {e}")
+        print(f"⚠️ Lagringsfeil: {e}")
 
 def main():
     driver = setup_driver()
@@ -217,10 +240,8 @@ def main():
     cur = conn.cursor()
 
     try:
-        # KJØR BEGGE ROBOTENE
         scrape_skien(driver, cur, conn)
         scrape_porsgrunn(driver, cur, conn)
-        
     finally:
         print("💾 Ferdig. Rydder opp.")
         cur.close()
