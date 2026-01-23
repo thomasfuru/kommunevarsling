@@ -1,0 +1,16 @@
+# Ignorer Python-søppel
+__pycache__/
+*.py[cod]
+
+# Ignorer det virtuelle miljøet (dette er for stort for GitHub)
+venv/
+
+# Ignorer hemmeligheter (VIKTIG!)
+src/config.py
+src/secrets.py
+.env
+
+# Ignorer skjermbilder og midlertidige filer
+*.png
+*.log
+skien_fasit.html
