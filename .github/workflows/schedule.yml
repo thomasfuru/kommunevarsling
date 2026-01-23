@@ -1,0 +1,41 @@
+name: Hent data og Varsle
+
+on:
+  schedule:
+    # Kjører 15 minutter over hver time
+    - cron: '15 * * * *'
+  workflow_dispatch: # Lar oss starte den manuelt for testing
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Henter koden din
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setter opp Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Installerer biblioteker
+        run: |
+          pip install -r requirements.txt
+
+      - name: 🤖 Kjører Roboten (Henter data)
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          # Bruker port/db_name fra koden (config.py default) hvis ikke satt her
+        run: python src/main_final.py
+
+      - name: 📢 Sjekker varsling (Slack)
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SLACK_URL: ${{ secrets.SLACK_URL }}
+        # OBS: Endre filnavnet under hvis varslings-logikken din ligger et annet sted!
+        run: python src/varsling.py
