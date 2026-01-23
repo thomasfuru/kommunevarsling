@@ -5,8 +5,8 @@ __pycache__/
 # Ignorer det virtuelle miljøet (dette er for stort for GitHub)
 venv/
 
-# Ignorer hemmeligheter (VIKTIG!)
-src/config.py
+# Ignorer Streamlit secrets
+.streamlit/secrets.toml
 src/secrets.py
 .env
 
