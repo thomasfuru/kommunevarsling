@@ -2,9 +2,8 @@ name: Hent data og Varsle
 
 on:
   schedule:
-    # Kjører 15 minutter over hver time
     - cron: '15 * * * *'
-  workflow_dispatch: # Lar oss starte den manuelt for testing
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -13,6 +12,11 @@ jobs:
     steps:
       - name: 📥 Henter koden din
         uses: actions/checkout@v4
+
+      - name: 🛠️ Installer Linux-verktøy (OCR & PDF)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils tesseract-ocr tesseract-ocr-nor
 
       - name: 🐍 Setter opp Python 3.11
         uses: actions/setup-python@v4
@@ -28,14 +32,10 @@ jobs:
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          # Bruker port/db_name fra koden (config.py default) hvis ikke satt her
-        run: python src/main_final.py
-
-      - name: 📢 Sjekker varsling (Slack)
-        env:
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           SLACK_URL: ${{ secrets.SLACK_URL }}
-        # OBS: Endre filnavnet under hvis varslings-logikken din ligger et annet sted!
-        run: python src/varsling.py
+        run: python src/main_final.py
+        
+      # (Hvis du har en egen varsling.py, ha den her. Hvis varsling skjer i main_final.py, kan du fjerne dette steget)
+      # - name: 📢 Sjekker varsling
+      #   env: ...
+      #   run: python src/varsling.py
