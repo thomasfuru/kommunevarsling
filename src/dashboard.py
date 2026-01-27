@@ -1,65 +1,54 @@
 import streamlit as st
-import pandas as pd
-import psycopg2
-import warnings  # <--- NY
-from config import Config
+import sys
+import os
 
-# --- LYDDEMPER ---
-# Vi ber Pandas slutte å klage på database-koblingen vår, for den virker fint.
-warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
+# --- FEILSØKINGS-MODUS ---
+st.set_page_config(page_title="Feilsøking", layout="wide")
 
-# Oppsett av siden
-st.set_page_config(page_title="Kommunevarsling", layout="wide")
+st.title("🛠️ Feilsøkings-modus")
+st.write("Hvis du ser denne teksten, så virker Streamlit!")
 
-st.title("🏛️ Kommunevarsling - Skien")
-
-# Koble til database
-@st.cache_data(ttl=60) # Cacher data i 60 sekunder
-def hent_data():
-    conn = psycopg2.connect(
-        dbname=Config.DB_NAME, user=Config.DB_USER, 
-        password=Config.DB_PASSWORD, host=Config.DB_HOST, port=Config.DB_PORT
-    )
-    # Vi henter data med Pandas for enkel visning
-    query = "SELECT dato, tittel, url_pdf as lenke, varslet, ocr_tekst FROM dokumenter ORDER BY id DESC LIMIT 500"
-    df = pd.read_sql(query, conn)
-    conn.close()
-    return df
-
+# Sjekk 1: Kan vi lese Secrets?
+st.subheader("1. Sjekker Secrets...")
 try:
-    df = hent_data()
-
-    # --- SIDEBAR (SØK) ---
-    st.sidebar.header("Filter")
-    soketekst = st.sidebar.text_input("Søk i dokumenter")
-    vis_kun_varslet = st.sidebar.checkbox("Vis kun varslede saker")
-
-    # --- FILTRERING ---
-    if soketekst:
-        # Vi søker i både tittel og OCR-tekst for bedre treff
-        df = df[
-            df['ocr_tekst'].str.contains(soketekst, case=False, na=False) | 
-            df['tittel'].str.contains(soketekst, case=False, na=False)
-        ]
-    
-    if vis_kun_varslet:
-        df = df[df['varslet'] == True]
-
-    # Vis antall
-    st.metric("Antall dokumenter funnet", len(df))
-
-    # --- TABELL ---
-    # Gjør lenken klikkbar
-    st.dataframe(
-        df[['dato', 'tittel', 'lenke', 'varslet']],
-        column_config={
-            "lenke": st.column_config.LinkColumn("Dokument"),
-            "varslet": st.column_config.CheckboxColumn("Varslet?", disabled=True),
-            "dato": st.column_config.DateColumn("Dato", format="DD.MM.YYYY")
-        },
-        use_container_width=True,
-        hide_index=True
-    )
-
+    if "database" in st.secrets:
+        st.success("✅ Fant seksjonen [database] i Secrets!")
+        # Prøver å lese en verdi for å se om nøklene stemmer
+        try:
+            test_host = st.secrets["database"]["DB_HOST"]
+            st.write(f"Fant DB_HOST: `{test_host}`")
+        except KeyError:
+            st.error("❌ Fant [database], men mangler 'DB_HOST' (Store bokstaver?). Sjekk stavemåten!")
+            st.write("Dette er nøklene jeg fant:", st.secrets["database"].keys())
+    else:
+        st.error("❌ Fant IKKE seksjonen [database]. Har du husket klammeparentesene i Secrets?")
+        st.write("Dette er topp-nivå nøklene jeg fant:", st.secrets.keys())
 except Exception as e:
-    st.error(f"Kunne ikke koble til databasen: {e}")
+    st.error(f"Noe er veldig galt med Secrets: {e}")
+
+# Sjekk 2: Prøver å laste Config
+st.subheader("2. Prøver å laste Config.py...")
+try:
+    # Vi må jukse litt med path for at den skal finne filen
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from config import Config
+    st.success("✅ Config lastet uten problemer!")
+except Exception as e:
+    st.error(f"❌ Config kræsjet: {e}")
+    st.stop() # Stopper her hvis config feiler
+
+# Sjekk 3: Prøver databasekobling
+st.subheader("3. Tester databasekobling...")
+try:
+    import psycopg2
+    conn = psycopg2.connect(
+        host=Config.DB_HOST,
+        database=Config.DB_NAME,
+        user=Config.DB_USER,
+        password=Config.DB_PASSWORD,
+        port=Config.DB_PORT
+    )
+    st.success("✅ Suksess! Koblet til databasen.")
+    conn.close()
+except Exception as e:
+    st.error(f"❌ Klarte ikke koble til databasen: {e}")
