@@ -1,54 +1,62 @@
 import streamlit as st
-import sys
+import psycopg2
+import pandas as pd
 import os
+import sys
 
-# --- FEILSØKINGS-MODUS ---
-st.set_page_config(page_title="Feilsøking", layout="wide")
+# --- OPPSETT ---
+st.set_page_config(page_title="Kommunevarsling", layout="wide")
 
-st.title("🛠️ Feilsøkings-modus")
-st.write("Hvis du ser denne teksten, så virker Streamlit!")
+# Tittel
+st.title("🔎 Kommunevarsling: Skien & Porsgrunn")
 
-# Sjekk 1: Kan vi lese Secrets?
-st.subheader("1. Sjekker Secrets...")
+# --- 1. HENT PASSORD (SECRETS) ---
+# Vi gjør dette manuelt her for å unngå Config-feil
 try:
+    # Sjekk om vi kjører lokalt eller på Streamlit Cloud
     if "database" in st.secrets:
-        st.success("✅ Fant seksjonen [database] i Secrets!")
-        # Prøver å lese en verdi for å se om nøklene stemmer
-        try:
-            test_host = st.secrets["database"]["DB_HOST"]
-            st.write(f"Fant DB_HOST: `{test_host}`")
-        except KeyError:
-            st.error("❌ Fant [database], men mangler 'DB_HOST' (Store bokstaver?). Sjekk stavemåten!")
-            st.write("Dette er nøklene jeg fant:", st.secrets["database"].keys())
+        db_config = st.secrets["database"]
     else:
-        st.error("❌ Fant IKKE seksjonen [database]. Har du husket klammeparentesene i Secrets?")
-        st.write("Dette er topp-nivå nøklene jeg fant:", st.secrets.keys())
+        st.error("❌ Fant ingen hemmeligheter (Secrets). Har du lagt dem inn i Streamlit?")
+        st.stop()
 except Exception as e:
-    st.error(f"Noe er veldig galt med Secrets: {e}")
+    st.error(f"❌ Noe gikk galt med lesing av Secrets: {e}")
+    st.stop()
 
-# Sjekk 2: Prøver å laste Config
-st.subheader("2. Prøver å laste Config.py...")
-try:
-    # Vi må jukse litt med path for at den skal finne filen
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from config import Config
-    st.success("✅ Config lastet uten problemer!")
-except Exception as e:
-    st.error(f"❌ Config kræsjet: {e}")
-    st.stop() # Stopper her hvis config feiler
+# --- 2. KOBLE TIL DATABASE ---
+@st.cache_data(ttl=600)  # Cacher data i 10 minutter
+def hent_data():
+    try:
+        conn = psycopg2.connect(
+            host=db_config["DB_HOST"],
+            database=db_config["DB_NAME"],
+            user=db_config["DB_USER"],
+            password=db_config["DB_PASSWORD"],
+            port=db_config["DB_PORT"]
+        )
+        query = "SELECT id, tittel, url_pdf, dato FROM dokumenter ORDER BY dato DESC LIMIT 50;"
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        return str(e)
 
-# Sjekk 3: Prøver databasekobling
-st.subheader("3. Tester databasekobling...")
-try:
-    import psycopg2
-    conn = psycopg2.connect(
-        host=Config.DB_HOST,
-        database=Config.DB_NAME,
-        user=Config.DB_USER,
-        password=Config.DB_PASSWORD,
-        port=Config.DB_PORT
-    )
-    st.success("✅ Suksess! Koblet til databasen.")
-    conn.close()
-except Exception as e:
-    st.error(f"❌ Klarte ikke koble til databasen: {e}")
+# --- 3. VIS DATA ---
+data = hent_data()
+
+if isinstance(data, str):
+    # Hvis data er en tekststreng, betyr det at vi fikk en feilmelding
+    st.error(f"❌ Klarte ikke koble til databasen: {data}")
+    st.info("Tips: Sjekk at passordet i Streamlit Secrets er helt riktig.")
+else:
+    # Hvis data er en tabell
+    if data.empty:
+        st.warning("⚠️ Databasen er koblet til, men den er tom! Roboten har ikke funnet noe ennå.")
+    else:
+        st.success(f"✅ Viser de siste {len(data)} sakene.")
+        
+        # Gjør tabellen penere
+        for index, row in data.iterrows():
+            with st.expander(f"{row['dato']} - {row['tittel']}"):
+                st.write(f"**Tittel:** {row['tittel']}")
+                st.markdown(f"[📄 Åpne dokument]({row['url_pdf']})")
